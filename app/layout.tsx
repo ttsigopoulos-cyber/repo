@@ -1,35 +1,25 @@
-import type { Metadata } from "next";
-import { Cinzel, Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import Link from "next/link";
 import "./globals.css";
 
-const cinzel = Cinzel({
-  subsets: ["latin"],
-  variable: "--font-display",
-  display: "swap",
-});
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  display: "swap",
-});
-
 export const metadata: Metadata = {
-  title: "Cosmic Horoscope Dashboard",
+  title: "Online-Interviewstudie Pflege · ESCP Executive MBA",
   description:
-    "Your daily horoscope dashboard — explore zodiac signs, daily readings, and cosmic insights.",
+    "Arbeitsalltag und Dokumentationsaufwand in Pflege und Seniorenbetreuung verstehen – eine akademische Interviewstudie der ESCP Business School.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#1f5f66" };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body
-        className={`${cinzel.variable} ${inter.variable} font-sans min-h-screen`}
-      >
+    <html lang="de">
+      <body>
+        <header className="site-head">
+          <Link href="/" className="brand">Interviewstudie Pflege</Link>
+          <nav aria-label="Hauptnavigation">
+            <Link href="/beleg">Teilnahmebeleg</Link>
+          </nav>
+        </header>
         {children}
       </body>
     </html>
