@@ -29,3 +29,6 @@
 
 # Snapshot cheatcodes output
 /snapshots
+
+# Local deployments (the local chain resets on every restart)
+ignition/deployments/chain-31337/
