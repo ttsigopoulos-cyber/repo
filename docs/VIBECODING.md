@@ -1,6 +1,6 @@
 # Vibecoding log
 
-How this application was built with AI-assisted development. Entries marked *to do* are steps still to be carried out in Cursor; replace them with what actually happened.
+How this application was built with AI-assisted development, from setting up the environment to the first live test.
 
 ## Phase 1 – Environment (30 September 2026, Cursor agent)
 
@@ -53,12 +53,27 @@ Human decisions taken during review:
 
 Not verified in the AI's sandbox (no network access to these services): live calls to Supabase and Gemini.
 
-## Phase 4 – Integration in Cursor (*to do*)
+## Phase 4 – Integration and live tests (1 October 2026)
 
-Suggested agent prompts:
+Integration was done by the student in Cursor's terminal (PowerShell, Windows), with Claude reviewing each step from screenshots and supplying fixes. Every problem that came up, in order:
 
-1. > Merge the files from the delivered folder into this repository. Keep my existing blockchain/hardhat.config.ts. Delete app/api/gemini/route.ts. Install viem, @supabase/supabase-js and server-only. Then run npm run build and fix any errors without changing lib/questions.ts.
-2. > Using the Supabase MCP, apply supabase/migrations/20261001000000_interview_platform.sql to my project and list the tables afterwards. (Switch `read_only=true` off for this step, then back on.)
-3. > Start the app and call /api/health. Explain any part that is not configured.
+| Step | What happened | Resolution |
+|---|---|---|
+| Merge | The delivered files were copied over the existing Next.js project. `git status` showed exactly the six intended modified files (layout, page, global styles, README, `next.config.ts`, `tsconfig.json`) plus the new folders. | – |
+| Dependencies | `npm install viem @supabase/supabase-js server-only` added 22 packages. npm reported 2 vulnerabilities (1 moderate, 1 high) and its advisory install-scripts notice. | No `npm audit fix --force`: it would upgrade to Next.js 16, a breaking change. The old Gemini test route was deleted. |
+| First build | Failed: `Definition for rule '@typescript-eslint/no-explicit-any' was not found` in `lib/chain.ts`. The project's ESLint configuration does not load the TypeScript rule set, so a comment disabling one of its rules counted as an error. | Claude replaced the generic, `any`-typed helper with three fully typed contract functions, re-verified the build and the chain flow in its sandbox, and the second build passed (16 routes). Pushed as commit `2245afc`. |
+| Database | Cursor's agent view showed no file explorer. | The migration was copied to the clipboard with `Get-Content -Raw … | Set-Clipboard`, run in the Supabase SQL Editor ("Success. No rows returned"), and created the tables `interviews`, `answers`, `reports`. |
+| Contract | `npx hardhat test`: 10 passing (3 Solidity, 7 node:test), compiled with solc 0.8.34. Ignition deployed `InterviewRegistry` to `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0`, with a harmless warning that the Counter example had been deployed on the same chain earlier. | – |
+| Configuration | A review of `.env.local` before restarting found a duplicate `NEXT_PUBLIC_CONTRACT_ADDRESS` line (old Counter address) and two unreplaced placeholders. | Old line removed, placeholders filled. The relayer key was verified locally with viem (`privateKeyToAccount` returned Hardhat account #1). |
+| Health check | `/api/health`: Supabase and Gemini configured, chain configured and reachable. | – |
+| Test interview | Invented answers. "Zimmer 12" was stopped by the local pattern check and nothing was stored. After rephrasing, Gemini detected the tool "Vivendi" and the reactive Part D appeared. 17 answers stored; consent recorded on-chain before the first question, interview sealed at the end; the receipt page confirmed that stored answers and on-chain checksum match. | – |
+| Tamper test | An answer was edited directly in Supabase to simulate manipulation, then restored. | *Result: [confirm: receipt page turned yellow after the edit and green again after restoring]* |
+| Research dashboard | The first Gemini analysis failed with HTTP 503 "This model is currently experiencing high demand". A temporary Google-side overload, but the same could hit a participant mid-interview. | Claude added automatic retries and a fallback model (`gemini-3.1-flash-lite`, configurable) to all Gemini calls. The next analysis succeeded with `gemini-3.5-flash`. |
+| Anchoring | The report checksum was anchored from MetaMask (Hardhat account #0, contract owner). | Transaction `0xb4ec7f3d…2ebfde`; the server confirmed it on-chain and listed the report as anchored. |
+| Demo data | `scripts/seed-demo.mjs` runs four invented interviews through the real API, so the dashboard shows meaningful themes, a median documentation time and a burden ranking. | – |
 
-Record here what the agent did, which errors appeared and how they were fixed.
+### What this phase showed
+
+- **The AI's sandbox tests did not catch environment differences.** The build passed with Next.js's TypeScript lint rules in the sandbox but failed with the project's own configuration. Testing in the target environment remains essential.
+- **Human review caught configuration errors the AI could not see.** The duplicate variable and placeholders in `.env.local` were found by checking a screenshot before restarting.
+- **Live operation exposed a robustness gap.** Overload of an external AI service is not a code error, but a platform used in real interviews has to absorb it. The fix came from a real failure, not from the original specification.

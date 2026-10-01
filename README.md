@@ -55,7 +55,8 @@ flowchart LR
 | `app/api/health` | Shows which parts of the stack are configured (no secrets) |
 | `lib/questions.ts` | All 72 questions, generated from the questionnaire workbook by `scripts/extract_questions.py`; German wording verbatim |
 | `lib/routing.ts` | Which questions each role gets, and in which order |
-| `lib/screening.ts`, `lib/gemini.ts` | Two-layer anonymisation guard and AI analysis |
+| `lib/screening.ts`, `lib/gemini.ts` | Two-layer anonymisation guard and AI analysis, with retry and fallback model |
+| `scripts/seed-demo.mjs` | Runs four invented demo interviews through the real API |
 | `lib/hash.ts`, `lib/chain.ts`, `lib/abi.ts` | Canonical hashing and contract access (viem) |
 | `supabase/migrations/…sql` | Tables `interviews`, `answers`, `reports`, RLS on |
 | `blockchain/contracts/InterviewRegistry.sol` | The contract (tests in `blockchain/test`, deployment in `blockchain/ignition/modules`) |
@@ -66,6 +67,7 @@ flowchart LR
 - **Participants need no wallet.** A server-side *relayer* (Hardhat account #1) writes consent, seal and withdrawal. Researchers use MetaMask (account #0, the contract owner) to anchor reports.
 - **Obvious identifiers never reach the AI.** Layer 1 is a local pattern check (room numbers, dates, "Frau/Herr + name"). Only answers that pass it are sent to Gemini (layer 2). Flagged answers are not stored; the participant rephrases or skips.
 - **The AI cannot introduce a product.** Part D appears only when Gemini reports a tool *and* that tool name literally occurs in the participant's answer.
+- **Resilient AI calls.** If Gemini reports overload (503) or a rate limit (429), the app retries and then switches to a fallback model (`GEMINI_FALLBACK_MODEL`, default `gemini-3.1-flash-lite`). If Gemini stays unavailable, answers are stored with `ai_checked=false` and flagged in the dashboard for manual review.
 - **Database locked to the server.** Row Level Security is enabled with no policies; only the secret key (server code) can read or write.
 - **Interview order follows the questionnaire's 25-minute rule.** Tier 1 questions first, in sheet order, then a checkpoint before tier 2 and tier 3. One deviation for self-administration: the closing block A11 is always asked last.
 - **Role routing.** Pflegekraft: Part A, Part B, C05. Leitung: Part A (with the Heimleitung variant of A04.1), Part B, C01–C04. Angehörige: C06–C09 only, switched off by default (`NEXT_PUBLIC_ENABLE_FAMILY`). Part D is reactive for both professional roles.
@@ -89,7 +91,7 @@ The application was built AI-first: we described *what* the platform must do in 
 2. **Specification instead of code.** We gave the AI the assignment brief, our flyer and the questionnaire workbook (72 questions, legal assessment, interviewer instructions) and asked for an application that fulfils every requirement.
 3. **AI-generated architecture and code** (Claude, Anthropic): question catalogue extracted programmatically from the workbook so the reviewed German wording stays verbatim; contract, tests, API routes, UI.
 4. **Verification loop**, run by the AI and checked by us: contract tests (5/5 passing), production build with type checking, ESLint, an end-to-end script driving the app's own chain code against a local Hardhat node (consent → seal → tamper detection → withdrawal), and a scripted browser walkthrough with screenshots, which revealed a mobile layout bug that was then fixed.
-5. **Integration in Cursor**: merging into the repository, applying the Supabase migration via MCP, live tests with real Gemini and Supabase keys.
+5. **Integration and live tests**: merging into the repository, a build error caused by a different ESLint configuration (fixed), applying the Supabase migration, deploying the contract, a full test interview, a tamper test, and a Gemini overload during the first analysis, which led to automatic retries with a fallback model.
 
 What we learned: the AI was fastest where the specification was precise (the workbook's routing and legal rules translated almost directly into code), and needed the most human judgement on data protection – for example, deciding that answers flagged for identifiers are never stored, rather than offering an override.
 
@@ -104,8 +106,8 @@ Node.js 22 or newer, Git, a Supabase project, a Gemini API key, MetaMask in the 
 ### 4.1 Install
 
 ```bash
-git clone https://github.com/GITHUB_USERNAME/REPOSITORY.git
-cd REPOSITORY
+git clone https://github.com/ttsigopoulos-cyber/repo.git
+cd repo
 npm install
 cd blockchain && npm install && cd ..
 ```
@@ -145,7 +147,8 @@ Copy `.env.example` to `.env.local` and fill it in:
 | `GEMINI_API_KEY` | From aistudio.google.com/apikey |
 | `NEXT_PUBLIC_CONTRACT_ADDRESS` | Address from step 4.3 |
 | `RELAYER_PRIVATE_KEY` | Account #1 key from `npx hardhat node` |
-| `RESEARCH_ACCESS_CODE` | Any code of at least 8 characters |
+| `RESEARCH_ACCESS_CODE` | Any code of at least 8 characters, letters and digits only |
+| `GEMINI_FALLBACK_MODEL` | Optional; default `gemini-3.1-flash-lite` |
 
 ### 4.5 Start the app
 
@@ -172,6 +175,22 @@ Add the network *Hardhat Local* (RPC `http://127.0.0.1:8545`, chain ID `31337`, 
 7. `/forschung` → access code → choose A07.6 → *Auswertung erstellen* → *Mit MetaMask verankern*.
 
 Only use invented demo answers for this (see section 6).
+
+### 4.8 Demo data
+
+With the app and the Hardhat node running, a second terminal in the main folder runs:
+
+```bash
+node scripts/seed-demo.mjs
+```
+
+It sends four invented interviews (three care workers, one director of nursing) through the real flow: consent on-chain, Gemini screening, sealing. It takes about five minutes and prints the receipt codes. The research dashboard then shows themes, a median documentation time (question A07.6) and a burden ranking (A03.2). Demo interviews carry the facility code `DEMO`; remove them in the Supabase SQL Editor with:
+
+```sql
+delete from public.interviews where facility_code = 'DEMO';
+```
+
+The on-chain records remain, but they are only hashes and can no longer be linked to any content.
 
 ---
 
