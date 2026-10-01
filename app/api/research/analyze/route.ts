@@ -2,7 +2,7 @@ import { db } from "@/lib/supabase";
 import { body, fail, json, errorMessage } from "@/lib/api";
 import { researchAuthorized } from "@/lib/research";
 import { byCode } from "@/lib/routing";
-import { analyseAnswers, geminiConfigured, geminiModel } from "@/lib/gemini";
+import { analyseAnswers, geminiConfigured } from "@/lib/gemini";
 import { hashOf } from "@/lib/hash";
 
 export const runtime = "nodejs";
@@ -30,8 +30,8 @@ export async function POST(req: Request) {
   if (!answers.length) return fail("Zu dieser Frage gibt es noch keine Antworten.");
 
   try {
-    const analysis = await analyseAnswers(q.text, answers);
-    const content = { questionCode: q.code, question: q.text, answerCount: answers.length, model: geminiModel(), createdAt: new Date().toISOString(), analysis };
+    const { analysis, model } = await analyseAnswers(q.text, answers);
+    const content = { questionCode: q.code, question: q.text, answerCount: answers.length, model, createdAt: new Date().toISOString(), analysis };
     const reportHash = hashOf(content);
     const { data, error: insErr } = await db()
       .from("reports")
@@ -41,6 +41,6 @@ export async function POST(req: Request) {
     if (insErr) return fail(insErr.message, 500);
     return json({ reportId: data.id, reportHash, content });
   } catch (e) {
-    return fail(`Gemini-Auswertung fehlgeschlagen: ${errorMessage(e)}`, 502);
+    return fail(`Gemini-Auswertung fehlgeschlagen: ${errorMessage(e)}`, 503);
   }
 }

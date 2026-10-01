@@ -5,12 +5,53 @@ import type { IdentifierType } from "./screening";
 // Model name: your test route returned 200 with this model on 30.09.2026. Model names change
 // often – check https://ai.google.dev/gemini-api/docs/models and override via GEMINI_MODEL.
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash";
+// Used when the main model is overloaded (HTTP 503) or rate-limited (429).
+// Set GEMINI_FALLBACK_MODEL=none to switch the fallback off.
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
 
 let ai: GoogleGenAI | null = null;
 export const geminiConfigured = () => !!process.env.GEMINI_API_KEY;
 function client() {
   if (!ai) ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return ai;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Temporary Google-side problems worth retrying: overload, rate limit, server error. */
+function isTemporary(e: unknown): boolean {
+  const status = (e as { status?: number })?.status;
+  if (status === 429 || status === 500 || status === 503 || status === 504) return true;
+  const msg = e instanceof Error ? e.message : String(e);
+  return /UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(msg);
+}
+
+type GenerateParams = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
+
+/**
+ * Calls Gemini with up to two attempts on the main model, then up to two on the fallback model.
+ * Returns the response and the model that actually answered.
+ */
+async function generate(params: Omit<GenerateParams, "model">) {
+  const models = FALLBACK_MODEL && FALLBACK_MODEL !== "none" && FALLBACK_MODEL !== MODEL ? [MODEL, FALLBACK_MODEL] : [MODEL];
+  let lastError: unknown;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await client().models.generateContent({ ...params, model });
+        return { res, model };
+      } catch (e) {
+        lastError = e;
+        if (!isTemporary(e)) throw e; // e.g. invalid key or bad request: retrying will not help
+        await sleep(attempt === 0 ? 1500 : 4000);
+      }
+    }
+  }
+  throw new Error(
+    `Gemini ist gerade überlastet (${models.join(", ")} nicht verfügbar). Bitte in ein bis zwei Minuten erneut versuchen. Details: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -38,8 +79,7 @@ Prüfe drei Dinge:
    genau so geschrieben, wie die Person sie nennt. Nichts ergänzen, nichts erfinden. Leeres Array, wenn keine genannt werden.`;
 
 export async function screenAnswer(question: string, answer: string): Promise<Screening> {
-  const res = await client().models.generateContent({
-    model: MODEL,
+  const { res } = await generate({
     contents: `FRAGE:\n${question}\n\nANTWORT:\n${answer}`,
     config: {
       systemInstruction: SCREEN_SYSTEM,
@@ -92,10 +132,9 @@ Du erhältst eine Frage und alle anonymisierten schriftlichen Antworten darauf. 
 - rankedBurdens: nur wenn Antworten Rangfolgen von Belastungen enthalten, zusammengefasste Belastung, Anzahl Nennungen und durchschnittlicher Rang. Sonst leeres Array.
 - caveats: Grenzen der Auswertung (z. B. kleine Stichprobe, Mehrdeutigkeiten).`;
 
-export async function analyseAnswers(question: string, answers: string[]): Promise<Analysis> {
+export async function analyseAnswers(question: string, answers: string[]): Promise<{ analysis: Analysis; model: string }> {
   const numbered = answers.map((a, i) => `[${i + 1}] ${a}`).join("\n\n");
-  const res = await client().models.generateContent({
-    model: MODEL,
+  const { res, model } = await generate({
     contents: `FRAGE:\n${question}\n\nANTWORTEN (${answers.length}):\n${numbered}`,
     config: {
       systemInstruction: ANALYSE_SYSTEM,
@@ -136,7 +175,7 @@ export async function analyseAnswers(question: string, answers: string[]): Promi
       },
     },
   });
-  return JSON.parse(res.text ?? "{}") as Analysis;
+  return { analysis: JSON.parse(res.text ?? "{}") as Analysis, model };
 }
 
 export const geminiModel = () => MODEL;

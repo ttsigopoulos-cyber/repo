@@ -1,0 +1,49 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_34-f3b9d9fecca78d67ded6176456fbe81f952340cb",
+  "solcVersion": "0.8.34",
+  "solcLongVersion": "0.8.34+commit.80d5c536",
+  "compilerType": "solc",
+  "toolVersions": {
+    "hardhat": "3.18.0"
+  },
+  "userSourceNameMap": {
+    "contracts/InterviewRegistry.sol": "project/contracts/InterviewRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "osaka",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode.linkReferences",
+            "evm.bytecode.object",
+            "evm.bytecode.opcodes",
+            "evm.bytecode.sourceMap",
+            "evm.deployedBytecode.immutableReferences",
+            "evm.deployedBytecode.linkReferences",
+            "evm.deployedBytecode.object",
+            "evm.deployedBytecode.opcodes",
+            "evm.deployedBytecode.sourceMap",
+            "evm.methodIdentifiers"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/InterviewRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/// @title InterviewRegistry\n/// @notice Tamper-evident audit trail for the ICP care-home interview study.\n/// @dev Stores ONLY salted keccak256 hashes and timestamps – never interview\n///      content, names or any other personal data. The salt lives off-chain\n///      (Supabase) and is deleted when a participant withdraws, which makes the\n///      remaining on-chain hash unlinkable.\ncontract InterviewRegistry {\n    struct Interview {\n        bytes32 consentHash;    // hash of consent text version + choices + salt\n        uint64 consentAt;       // block timestamp of consent\n        bytes32 transcriptHash; // hash of the anonymised answers + salt\n        uint64 sealedAt;        // block timestamp of sealing (0 = open)\n        bool withdrawn;         // participant withdrew; off-chain data deleted\n    }\n\n    address public owner;\n    mapping(address => bool) public writers;\n    mapping(bytes32 => Interview) private interviews;\n    mapping(bytes32 => uint64) public reportAnchoredAt;\n\n    uint256 public consentCount;\n    uint256 public sealedCount;\n\n    event WriterSet(address indexed writer, bool allowed);\n    event ConsentRecorded(bytes32 indexed interviewId, bytes32 consentHash, uint64 timestamp);\n    event InterviewSealed(bytes32 indexed interviewId, bytes32 transcriptHash, uint64 timestamp);\n    event InterviewWithdrawn(bytes32 indexed interviewId, uint64 timestamp);\n    event ReportAnchored(bytes32 indexed reportHash, address indexed researcher, string label, uint64 timestamp);\n\n    error NotOwner();\n    error NotWriter();\n    error ZeroHash();\n    error ConsentAlreadyRecorded();\n    error NoConsent();\n    error AlreadySealed();\n    error AlreadyWithdrawn();\n    error ReportAlreadyAnchored();\n\n    modifier onlyOwner() {\n        if (msg.sender != owner) revert NotOwner();\n        _;\n    }\n\n    modifier onlyWriter() {\n        if (msg.sender != owner && !writers[msg.sender]) revert NotWriter();\n        _;\n    }\n\n    constructor(address relayer) {\n        owner = msg.sender;\n        if (relayer != address(0)) {\n            writers[relayer] = true;\n            emit WriterSet(relayer, true);\n        }\n    }\n\n    function setWriter(address writer, bool allowed) external onlyOwner {\n        writers[writer] = allowed;\n        emit WriterSet(writer, allowed);\n    }\n\n    /// @notice Step 1: consent is recorded BEFORE the first question is shown.\n    function recordConsent(bytes32 interviewId, bytes32 consentHash) external onlyWriter {\n        if (interviewId == bytes32(0) || consentHash == bytes32(0)) revert ZeroHash();\n        Interview storage it = interviews[interviewId];\n        if (it.consentAt != 0) revert ConsentAlreadyRecorded();\n        it.consentHash = consentHash;\n        it.consentAt = uint64(block.timestamp);\n        consentCount++;\n        emit ConsentRecorded(interviewId, consentHash, it.consentAt);\n    }\n\n    /// @notice Step 2: the finished, anonymised answer set is sealed once.\n    function sealInterview(bytes32 interviewId, bytes32 transcriptHash) external onlyWriter {\n        if (transcriptHash == bytes32(0)) revert ZeroHash();\n        Interview storage it = interviews[interviewId];\n        if (it.consentAt == 0) revert NoConsent();\n        if (it.withdrawn) revert AlreadyWithdrawn();\n        if (it.sealedAt != 0) revert AlreadySealed();\n        it.transcriptHash = transcriptHash;\n        it.sealedAt = uint64(block.timestamp);\n        sealedCount++;\n        emit InterviewSealed(interviewId, transcriptHash, it.sealedAt);\n    }\n\n    /// @notice A participant may withdraw at any time (before or after sealing).\n    function markWithdrawn(bytes32 interviewId) external onlyWriter {\n        Interview storage it = interviews[interviewId];\n        if (it.consentAt == 0) revert NoConsent();\n        if (it.withdrawn) revert AlreadyWithdrawn();\n        it.withdrawn = true;\n        emit InterviewWithdrawn(interviewId, uint64(block.timestamp));\n    }\n\n    /// @notice A researcher anchors the hash of an AI-generated analysis report\n    ///         (called from the browser via MetaMask).\n    function anchorReport(bytes32 reportHash, string calldata label) external onlyWriter {\n        if (reportHash == bytes32(0)) revert ZeroHash();\n        if (reportAnchoredAt[reportHash] != 0) revert ReportAlreadyAnchored();\n        reportAnchoredAt[reportHash] = uint64(block.timestamp);\n        emit ReportAnchored(reportHash, msg.sender, label, uint64(block.timestamp));\n    }\n\n    function getInterview(bytes32 interviewId) external view returns (Interview memory) {\n        return interviews[interviewId];\n    }\n}\n"
+      }
+    }
+  }
+}
